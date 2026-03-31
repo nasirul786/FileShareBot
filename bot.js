@@ -2,7 +2,7 @@ require('dotenv').config();
 const { Bot, session, InlineKeyboard } = require('grammy');
 const { logUser, encryptPayload, decryptPayload } = require('./utils');
 
-const { BOT_TOKEN, CHANNEL_ID, SECRET_KEY, ADMIN_ID } = process.env;
+const { BOT_TOKEN, CHANNEL_ID, SECRET_KEY } = process.env;
 
 if (!BOT_TOKEN || !CHANNEL_ID || !SECRET_KEY) {
     console.error("Missing environment variables!");
@@ -19,11 +19,9 @@ bot.use(session({
         awaitingLock: false,
         pendingPayload: null,
         awaitingPasscode: false,
-        lastStatusMsgId: null // To track the message we edit
+        lastStatusMsgId: null
     })
 }));
-
-const isAdmin = (ctx) => ctx.from && ctx.from.id.toString() === ADMIN_ID;
 
 // Start command
 bot.command('start', async (ctx) => {
@@ -39,25 +37,26 @@ bot.command('start', async (ctx) => {
             ctx.session.awaitingPasscode = true;
             return ctx.reply("🔐 *This file is locked.*\nPlease enter the 4-digit passcode to access it:", { parse_mode: "Markdown" });
         }
-        return sendFiles(ctx, data.startId, data.endId);
+        return sendFiles(ctx, data.ids);
     }
 
-    // Default welcome message
+    // New Public welcome message
     const welcomeText = 
         "🚀 *Welcome to File Store Bot!*\n\n" +
-        "You can store unlimited files and get quick sharing links. " +
-        "Keep your files secure with a custom *4-digit lock*.\n\n" +
-        (isAdmin(ctx) ? "👨‍💻 *Admin Menu Ready:*\nJust send me the files to begin." : "Use an access link to retrieve files shared with you.");
+        "Upload files and get your own private sharing links instantly. " +
+        "Everything is secure and protected with *AES-256 encryption* and optional *4-digit locks*.\n\n" +
+        "👇 *How to use:*\n" +
+        "1. Send me any files (Images, Videos, or Documents).\n" +
+        "2. Click the 'Upload' button to get your link.\n" +
+        "3. Share with anyone!";
 
     await ctx.reply(welcomeText, { parse_mode: "Markdown" });
 });
 
-// File upload handling (Admin only)
+// File upload handling (Public)
 bot.on(['message:photo', 'message:video', 'message:document', 'message:audio'], async (ctx) => {
-    if (!isAdmin(ctx)) return;
-
     if (ctx.session.tempIds.length >= MAX_FILES) {
-        return ctx.reply(`❌ Maximum ${MAX_FILES} files can be stored together.`);
+        return ctx.reply(`❌ Maximum ${MAX_FILES} files can be stored in a single link.`);
     }
 
     try {
@@ -65,12 +64,8 @@ bot.on(['message:photo', 'message:video', 'message:document', 'message:audio'], 
         const forwarded = await ctx.forwardMessage(CHANNEL_ID);
         ctx.session.tempIds.push(forwarded.message_id);
 
-        // Delete the original file from admin's chat
-        try {
-            await ctx.deleteMessage();
-        } catch (e) {
-            console.error("Failed to delete original message:", e);
-        }
+        // Delete the original file from user's chat
+        try { await ctx.deleteMessage(); } catch (e) {}
 
         const count = ctx.session.tempIds.length;
         const keyboard = new InlineKeyboard()
@@ -81,7 +76,6 @@ bot.on(['message:photo', 'message:video', 'message:document', 'message:audio'], 
         const msgText = `✅ *${count} file${count > 1 ? 's' : ''} received.*\n\n` +
                         `Send another or click the button below to generate a link.`;
 
-        // If we have a status message, edit it. Otherwise send new.
         if (ctx.session.lastStatusMsgId) {
             try {
                 await ctx.api.editMessageText(ctx.chat.id, ctx.session.lastStatusMsgId, msgText, {
@@ -89,7 +83,6 @@ bot.on(['message:photo', 'message:video', 'message:document', 'message:audio'], 
                     reply_markup: keyboard
                 });
             } catch (e) {
-                // If message deleted or couldn't edit, send new
                 const msg = await ctx.reply(msgText, { parse_mode: "Markdown", reply_markup: keyboard });
                 ctx.session.lastStatusMsgId = msg.message_id;
             }
@@ -99,14 +92,12 @@ bot.on(['message:photo', 'message:video', 'message:document', 'message:audio'], 
         }
     } catch (error) {
         console.error(error);
-        ctx.reply("❌ Error: Make sure I am admin in the storage channel.");
+        ctx.reply("❌ Error: Storage channel unavailable.");
     }
 });
 
-// Callback query handling
+// Callback query handling (Public)
 bot.on("callback_query:data", async (ctx) => {
-    if (!isAdmin(ctx)) return;
-
     if (ctx.callbackQuery.data === "gen_no_lock") {
         await ctx.answerCallbackQuery();
         await generateFinalLink(ctx, null);
@@ -116,7 +107,6 @@ bot.on("callback_query:data", async (ctx) => {
         ctx.session.awaitingLock = true;
         await ctx.reply("🔐 *Enter a 4-digit numerical pin* for this link:", { parse_mode: "Markdown" });
         
-        // Remove buttons from the status message
         if (ctx.session.lastStatusMsgId) {
             try {
                 await ctx.api.editMessageReplyMarkup(ctx.chat.id, ctx.session.lastStatusMsgId, { reply_markup: null });
@@ -128,7 +118,7 @@ bot.on("callback_query:data", async (ctx) => {
 // Text input handling (Passcodes and Locks)
 bot.on('message:text', async (ctx) => {
     // Setting lock for new link
-    if (ctx.session.awaitingLock && isAdmin(ctx)) {
+    if (ctx.session.awaitingLock) {
         const input = ctx.message.text.trim();
         if (/^\d{4}$/.test(input)) {
             generateFinalLink(ctx, input);
@@ -147,7 +137,7 @@ bot.on('message:text', async (ctx) => {
             ctx.session.awaitingPasscode = false;
             ctx.session.pendingPayload = null;
             await ctx.reply("✅ *Access granted!* Sending files...", { parse_mode: "Markdown" });
-            return sendFiles(ctx, data.startId, data.endId);
+            return sendFiles(ctx, data.ids);
         } else {
             ctx.session.awaitingPasscode = false;
             ctx.session.pendingPayload = null;
@@ -163,10 +153,7 @@ async function generateFinalLink(ctx, lockCode) {
     if (ctx.session.tempIds.length === 0) return;
 
     const me = await bot.api.getMe();
-    const startId = ctx.session.tempIds[0];
-    const endId = ctx.session.tempIds[ctx.session.tempIds.length - 1];
-
-    const payload = encryptPayload(startId, endId, lockCode, SECRET_KEY);
+    const payload = encryptPayload(ctx.session.tempIds, lockCode, SECRET_KEY);
     const link = `https://t.me/${me.username}?start=${payload}`;
 
     await ctx.reply(
@@ -180,18 +167,18 @@ async function generateFinalLink(ctx, lockCode) {
     // Reset session
     ctx.session.tempIds = [];
     ctx.session.awaitingLock = false;
-    ctx.session.lastStatusMsgId = null; // Clear so next batch starts fresh
+    ctx.session.lastStatusMsgId = null;
 }
 
 /**
- * Copy file range from channel to user
+ * Copy file list from channel to user
  */
-async function sendFiles(ctx, startId, endId) {
-    for (let id = startId; id <= endId; id++) {
+async function sendFiles(ctx, ids) {
+    for (const id of ids) {
         try {
             await bot.api.copyMessage(ctx.from.id, CHANNEL_ID, id);
         } catch (e) {
-            // Skip non-existent or deleted messages in range
+            // Message might be deleted in the storage channel
         }
     }
 }
@@ -199,5 +186,5 @@ async function sendFiles(ctx, startId, endId) {
 bot.catch((err) => console.error("Bot Error:", err));
 
 bot.start({
-    onStart: (me) => console.log(`Bot @${me.username} is running!`),
+    onStart: (me) => console.log(`Bot @${me.username} is running! (PUBLIC MODE)`),
 });

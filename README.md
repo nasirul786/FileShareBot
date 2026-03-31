@@ -1,15 +1,15 @@
-# 🚀 Telegram File Store Bot
+# 🚀 Public Telegram File Store Bot
 
-A high-performance, **database-less** Telegram bot built with `grammy` to store and share files securely. It features batch uploads (up to 50 files), 4-digit PIN protection, and AES-256 encrypted access links.
+A high-performance, **database-less** Telegram bot built with `grammy` to store and share files securely. This bot is now **PUBLIC**, allowing anyone to upload and share files with ease.
 
 ## ✨ Features
 
-- **📂 Batch File Storage**: Admin can send up to 50 files (images, videos, documents) and generate a single link.
-- **🔐 PIN Protection**: Secure your links with an optional 4-digit numerical code.
-- **🔒 AES-256 Encryption**: Access links are fully encrypted, ensuring file IDs are never exposed directly.
-- **✨ Hybrid Storage**: Uses a private channel as the backbone for storage, keeping user chats clean.
-- **⚡ Zero Database**: Operates without a database. It stores user IDs in a simple `.txt` file and packs all link metadata natively in the URL.
-- **💎 Premium UI**: Auto-deletes admin uploads to keep the view clean and updates status messages dynamically.
+- **📂 Public Batch Storage**: Anyone can send up to 50 files and generate a secure link instantly.
+- **🔐 PIN Protection**: Secure your links with an optional 4-digit code.
+- **🛡️ Bitmask-based Security**: A unique system that ensures privacy for every user without needing a database. Even if multiple users upload files at once, the bitmask only unlocks your specific files.
+- **🔒 AES-256 Encryption**: Link metadata is fully encrypted for maximum privacy.
+- **⚡ Zero Database**: No SQL or MongoDB needed. It uses binary payload packing to store everything in the link itself.
+- **💎 Premium UI**: Auto-deletes original messages and updates status messages dynamically.
 
 ## 🛠️ Installation & Setup
 
